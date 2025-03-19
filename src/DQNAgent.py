@@ -4,38 +4,46 @@ import torch.optim as optim
 import random
 import numpy as np
 from collections import deque
-from src.game import ThreeDTicTacToe
+from game import ThreeDTicTacToe
 import torch.nn.functional as F
 from utils import print_board, legal_moves
 
-
+device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 # Define the Deep Q-Network (DQN)
 class DQN(nn.Module):
     def __init__(self):
         super(DQN, self).__init__()
-        self.fc1 = nn.Linear(27, 64)  # 3x3x3 board flattened
-        self.fc2 = nn.Linear(64, 64)
-        self.fc3 = nn.Linear(64, 64)
-        self.fc4 = nn.Linear(64, 64)
-
-        self.fc5 = nn.Linear(64, 9)  # 9 possible moves (x, y positions)
+        # Input shape: (batch_size, 1, 3, 3, 3)
+        self.conv1 = nn.Conv3d(1, 32, kernel_size=2, stride=1, padding=1)
+        self.conv2 = nn.Conv3d(32, 32, kernel_size=2, stride=1, padding=1)
+        self.conv3 = nn.Conv3d(32, 32, kernel_size=2, stride=1, padding=1)
+        
+        # Calculate the size after convolutions
+        self.fc1 = nn.Linear(32 * 6 ** 3, 256)
+        self.fc2 = nn.Linear(256, 9)  # 9 possible moves (x, y positions)
 
     def forward(self, x):
-        x = torch.relu(self.fc1(x))
-        x = torch.relu(self.fc2(x))
-        x = torch.relu(self.fc3(x))
-        x = torch.relu(self.fc4(x))
-
-        return self.fc5(x)
+        # Reshape input to (batch_size, channels, depth, height, width)
+        x = x.view(-1, 1, 3, 3, 3).to(device)
+        
+        x = F.relu(self.conv1(x))
+        x = F.relu(self.conv2(x))
+        x = F.relu(self.conv3(x))
+        
+        # Flatten the output for the fully connected layers
+        x = x.view(x.size(0), -1)
+        
+        x = F.relu(self.fc1(x))
+        return self.fc2(x)
 
 
 # Define the Reinforcement Learning Agent with Double DQN
 class TicTacToeAgent:
-    def __init__(self, number, learning_rate=0.001, gamma=0.95, epsilon=1.0, epsilon_decay=0.995, epsilon_min=0.01,
+    def __init__(self, number, learning_rate=0.001, gamma=0.95, epsilon=1.0, epsilon_decay=0.999, epsilon_min=0.02,
                  model_path=None):
         self.number = number
-        self.online_network = DQN()
-        self.target_network = DQN()
+        self.online_network = DQN().to(device)
+        self.target_network = DQN().to(device)
         self.update_target_network()
         self.optimizer = optim.Adam(self.online_network.parameters(), lr=learning_rate)
         self.criterion = nn.MSELoss()
@@ -90,14 +98,14 @@ class TicTacToeAgent:
         batch = random.sample(self.memory, batch_size)
         states, actions, rewards, next_states, dones = zip(*batch)
 
-        states = torch.tensor(np.array(states), dtype=torch.float32).view(batch_size, -1)
-        next_states = torch.tensor(np.array(next_states), dtype=torch.float32).view(batch_size, -1)
-        actions = torch.tensor(actions, dtype=torch.int64).unsqueeze(1)
-        rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1)
-        dones = torch.tensor(dones, dtype=torch.float32).unsqueeze(1)
+        states = torch.tensor(np.array(states), dtype=torch.float32).view(batch_size, -1).to(device)
+        next_states = torch.tensor(np.array(next_states), dtype=torch.float32).view(batch_size, -1).to(device)
+        actions = torch.tensor(actions, dtype=torch.int64).unsqueeze(1).to(device)
+        rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1).to(device)
+        dones = torch.tensor(dones, dtype=torch.float32).unsqueeze(1).to(device)    
 
         # Get current Q values
-        q_values = self.online_network(states).gather(1, actions)
+        q_values = self.online_network(states * self.number).gather(1, actions)
 
         # --- Probabilistic State Transition ---
         with torch.no_grad():
@@ -119,7 +127,7 @@ class TicTacToeAgent:
             true_next_states = self._simulate_opponent_move(next_states, opponent_best_actions)
 
             # Step 3: Compute Target Q-values
-            next_q_values = self.target_network(true_next_states).max(dim=1, keepdim=True)[0]  # Max Q-value for next state
+            next_q_values = self.target_network(true_next_states * self.number).max(dim=1, keepdim=True)[0]  # Max Q-value for next state
 
             # Minimax Q-value update
             target_q_values = rewards + (self.gamma * next_q_values * (1 - dones))
@@ -154,13 +162,15 @@ class TicTacToeAgent:
         self.online_network.load_state_dict(other_agent.online_network.state_dict())
         self.target_network.load_state_dict(other_agent.target_network.state_dict())
 
-
+    def load_model_from_file(self, filename):
+        self.online_network.load_state_dict(torch.load(filename))
+        
 # Training Loop - Self-Play
 if __name__ == "__main__":
     agent1 = TicTacToeAgent(1, epsilon_min=.02)
     agent2 = TicTacToeAgent(-1, epsilon_min=.02)
     num_episodes = 10000
-    num_epochs = 1
+    num_epochs = 40
     target_update_frequency = 10
     total_reward1 = 0
     total_reward2 = 0
@@ -181,22 +191,23 @@ if __name__ == "__main__":
                 x, y = divmod(action, 3)
 
                 reward = 0
+                can_win = player in game.check_two_in_a_row()
+
                 if not game.move(player, (x, y)):
-                    reward = -1000
-                    print("hello")
-                    print(list(game.legal_moves()))
-                    print(f"Invalid move: {x}, {y}")
-                    print(game.get_state())
+                    reward = -1
+                    
                     break
 
                 if game.check_win() == player:
-                    reward = 10
+                    reward = 1
                     done = True
                     # print_board(game.get_state())
-                elif game.check_two_in_a_row() == player * -1:
-                    reward = -10
+                elif can_win:
+                    reward = -1  # If it was possible to win, and they didn't, punish
+                elif player * -1 in game.check_two_in_a_row():  # If the other player has two in a row and this player didn't block it, punish
+                    reward = -1
                 elif game.full_board():
-                    reward = 5
+                    reward = .5
                     print("draw")
                     done = True
 

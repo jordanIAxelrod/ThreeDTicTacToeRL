@@ -5,6 +5,7 @@ class ThreeDTicTacToe:
     def __init__(self):
         """Initialize a 3x3x3 tic-tac-toe board."""
         self.board = torch.zeros((3, 3, 3), dtype=torch.int8)
+        self.winning_coordinates = None  # Store winning coordinates
 
     def move(self, player: int, position: tuple) -> bool:
         """
@@ -52,6 +53,10 @@ class ThreeDTicTacToe:
 
         return 0
 
+    def get_winning_coordinates(self):
+        """Return the coordinates of the winning line if there is one."""
+        return self.winning_coordinates
+
     def _check_axis(self, axis: int) -> int:
         """
         Helper function to check for a win along a given axis.
@@ -64,35 +69,79 @@ class ThreeDTicTacToe:
         for i in range(3):
             for j in range(3):
                 if abs(board[i, j, :].sum()) == 3:  # Horizontal win in this plane
+                    # Convert coordinates back to original orientation
+                    if axis == 0:
+                        self.winning_coordinates = [(i, j, k) for k in range(3)]
+                    elif axis == 1:
+                        self.winning_coordinates = [(j, i, k) for k in range(3)]
+                    else:
+                        self.winning_coordinates = [(j, k, i) for k in range(3)]
                     return int(board[i, j, 0])
+                
                 if abs(board[i, :, j].sum()) == 3:  # Vertical win in this plane
+                    if axis == 0:
+                        self.winning_coordinates = [(i, k, j) for k in range(3)]
+                    elif axis == 1:
+                        self.winning_coordinates = [(k, i, j) for k in range(3)]
+                    else:
+                        self.winning_coordinates = [(k, j, i) for k in range(3)]
                     return int(board[i, 0, j])
+                
                 if abs(board[:, i, j].sum()) == 3:  # Depth-wise win through layers
+                    if axis == 0:
+                        self.winning_coordinates = [(k, i, j) for k in range(3)]
+                    elif axis == 1:
+                        self.winning_coordinates = [(i, k, j) for k in range(3)]
+                    else:
+                        self.winning_coordinates = [(i, j, k) for k in range(3)]
                     return int(board[0, i, j])
 
         # Check diagonals within each plane
         for i in range(3):
             if abs(board[i].diagonal().sum()) == 3:  # Top-left to bottom-right diagonal
+                if axis == 0:
+                    self.winning_coordinates = [(i, k, k) for k in range(3)]
+                elif axis == 1:
+                    self.winning_coordinates = [(k, i, k) for k in range(3)]
+                else:
+                    self.winning_coordinates = [(k, k, i) for k in range(3)]
                 return int(board[i, 0, 0])
+            
             if abs(torch.flip(board[i], [1]).diagonal().sum()) == 3:  # Top-right to bottom-left diagonal
+                if axis == 0:
+                    self.winning_coordinates = [(i, k, 2-k) for k in range(3)]
+                elif axis == 1:
+                    self.winning_coordinates = [(k, i, 2-k) for k in range(3)]
+                else:
+                    self.winning_coordinates = [(k, 2-k, i) for k in range(3)]
                 return int(board[i, 0, 2])
 
         # Check 3D diagonals across layers
-        diag1 = board.diagonal(dim1=0,
-                               dim2=1).diagonal().sum()  # Across XY plane  # Corrected to get the full diagonal sum  # Across XY plane
-        diag2 = board.diagonal(dim1=0, dim2=2).diagonal().sum()  # Across XZ plane
-        diag3 = board.diagonal(dim1=1, dim2=2).diagonal().sum()  # Across YZ plane
-        diag4 = board.flip(2).diagonal(dim1=0, dim2=1).diagonal().sum()  # Flipped 3D diagonal
+        diag1 = board.diagonal(dim1=0, dim2=1).diagonal().sum()
+        diag2 = board.diagonal(dim1=0, dim2=2).diagonal().sum()
+        diag3 = board.diagonal(dim1=1, dim2=2).diagonal().sum()
+        diag4 = board.flip(2).diagonal(dim1=0, dim2=1).diagonal().sum()
 
-        # If any 3D diagonal sums to 3 or -3, return the winning player
-        for diag in (diag1, diag2, diag3, diag4):
-            if abs(diag) == 3:
-                return int(torch.sign(diag))
+        # Check 3D diagonals
+        if abs(diag1) == 3:
+            self.winning_coordinates = [(i, i, i) for i in range(3)]
+            return int(torch.sign(diag1))
+        if abs(diag2) == 3:
+            self.winning_coordinates = [(i, i, 2-i) for i in range(3)]
+            return int(torch.sign(diag2))
+        if abs(diag3) == 3:
+            self.winning_coordinates = [(i, 2-i, i) for i in range(3)]
+            return int(torch.sign(diag3))
+        if abs(diag4) == 3:
+            self.winning_coordinates = [(2-i, i, i) for i in range(3)]
+            return int(torch.sign(diag4))
 
         return 0
 
-    def check_two_in_a_row(self) -> int:
+    def check_two_in_a_row(self) -> list:
         """Check if a player has two out of three in a row without the other player's piece."""
+        players_with_two_in_a_row = []
+
         for axis in range(3):
             board = self.board.permute((axis,) + tuple(range(3))[:axis] + tuple(range(3))[axis + 1:])
 
@@ -101,19 +150,19 @@ class ThreeDTicTacToe:
                     for line in [board[i, j, :], board[i, :, j], board[:, i, j]]:
                         if (line == -1).any() and (line == 1).any():
                             continue  # Skip if both players are in the row
-                        if line.sum() == 2:
-                            return 1  # Player 1 has two in a row
-                        if line.sum() == -2:
-                            return -1  # Player -1 has two in a row
+                        if line.sum() == 2 and 1 not in players_with_two_in_a_row:
+                            players_with_two_in_a_row.append(1)  # Player 1 has two in a row
+                        if line.sum() == -2 and -1 not in players_with_two_in_a_row:
+                            players_with_two_in_a_row.append(-1)  # Player -1 has two in a row
 
                 # Check diagonals in the plane
                 for diag in [board[i].diagonal(), torch.flip(board[i], [1]).diagonal()]:
                     if (diag == -1).any() and (diag == 1).any():
                         continue
-                    if diag.sum() == 2:
-                        return 1
-                    if diag.sum() == -2:
-                        return -1
+                    if diag.sum() == 2 and 1 not in players_with_two_in_a_row:
+                        players_with_two_in_a_row.append(1)
+                    if diag.sum() == -2 and -1 not in players_with_two_in_a_row:
+                        players_with_two_in_a_row.append(-1)
 
         # Check 3D diagonals
         diagonals = [
@@ -126,12 +175,12 @@ class ThreeDTicTacToe:
         for diag in diagonals:
             if (diag == -1).any() and (diag == 1).any():
                 continue
-            if diag.sum() == 2:
-                return 1
-            if diag.sum() == -2:
-                return -1
+            if diag.sum() == 2 and 1 not in players_with_two_in_a_row:
+                players_with_two_in_a_row.append(1)
+            if diag.sum() == -2 and -1 not in players_with_two_in_a_row:
+                players_with_two_in_a_row.append(-1)
 
-        return 0  # No two-in-a-row found
+        return players_with_two_in_a_row  # Return list of players with two-in-a-row
 
     def full_board(self) -> bool:
         return not (self.board == 0).any()
