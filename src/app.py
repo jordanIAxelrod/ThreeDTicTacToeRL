@@ -1,8 +1,8 @@
 from flask import Flask, render_template, jsonify, request
 import torch
-from game import ThreeDTicTacToe
-from models.DQNAgent import TicTacToeAgent
-from models.minimax import MinimaxAgent
+from src.game import ThreeDTicTacToe
+from src.models.DQNAgent import TicTacToeAgent
+from src.models.minimax import MinimaxAgent
 from time import sleep
 app = Flask(__name__)
 
@@ -184,6 +184,7 @@ def make_move():
                     'error': 'Invalid move',
                     'board': game.get_state().tolist()
                 })
+            print(game.check_two_in_a_row())
 
             status = check_game_status()
             if status:

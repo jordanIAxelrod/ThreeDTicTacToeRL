@@ -1,7 +1,7 @@
-from game import ThreeDTicTacToe
+from src.game import ThreeDTicTacToe
 from typing import Dict, Tuple, List
 import numpy as np
-from utils import print_board
+from src.utils import print_board
 import json
 import os
 

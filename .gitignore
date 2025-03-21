@@ -23346,4 +23346,6 @@ src/__pycache__/utils.cpython-39.pyc
 .venv/Scripts/pytest.exe
 .venv/Scripts/ttx.exe
 .venv/share/man/man1/ttx.1
+.venv/*
+.venv
 *.png

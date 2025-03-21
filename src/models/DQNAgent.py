@@ -12,8 +12,8 @@ import torch.nn.functional as F
 import random
 import numpy as np
 from collections import deque
-from ..game import ThreeDTicTacToe
-from ..utils import legal_moves
+from src.game import ThreeDTicTacToe
+from src.utils import legal_moves, print_board
 import matplotlib.pyplot as plt
 
 # Set device for PyTorch operations
@@ -227,8 +227,7 @@ class TicTacToeAgent:
                 opponent_best_actions = self._get_opponent_actions(flipped_next_states)
                 
                 # Get true next states after opponent's move
-                true_next_states = self._simulate_opponent_move(next_states, opponent_best_actions)  # true next states from current agent perspective
-                
+                true_next_states = self._simulate_opponent_move(flipped_next_states, opponent_best_actions)  # true next states from current agent perspective
                 # Compute target Q-values
                 next_q_values = self.target_network(true_next_states * self.number).max(dim=1, keepdim=True)[0]
                 target_q_values = rewards + (self.gamma * next_q_values * (1 - dones))
@@ -276,9 +275,10 @@ class TicTacToeAgent:
         simulated_states = states.clone()
         for i in range(len(states)):
             board = simulated_states[i].view(3, 3, 3)
+            
             x, y = divmod(actions[i].item(), 3)
             for i in range(3):
-                if board[x, y, i] == 0:
+                if board[x, y, i] == 0: 
                     board[x, y, i] = self.number
                     break
             simulated_states[i] = -board.flatten()  # Reverse the perspective
@@ -342,7 +342,6 @@ def get_action(agent: TicTacToeAgent, game: ThreeDTicTacToe, player: int) -> Tup
     x, y = divmod(action, 3)
     return action, x, y
 
-
 def get_reward(game: ThreeDTicTacToe, player: int, move: Tuple[int, int]) -> Tuple[float, bool]:
     """Calculate reward for a move.
     
@@ -364,11 +363,11 @@ def get_reward(game: ThreeDTicTacToe, player: int, move: Tuple[int, int]) -> Tup
     if not game.move(player, move):
         reward = -2.0  # Increased penalty for invalid moves
     elif game.check_win() == player:
-        reward = 10.0  - game.board.abs().sum() / 27  # Increased reward for winning
+        reward = 10.0  - game.board.abs().sum() / 27 * 9  # Increased reward for winning
         done = True
     elif opponent_can_win:
         # not blocking opponent's winning move
-        reward = -8.0 + game.board.abs().sum() / 27
+        reward = -8.0 + game.board.abs().sum() / 27 * 7
     elif can_win:
         # Missed opportunity to win
         reward = -5.0
@@ -391,9 +390,11 @@ def train_agents(
     num_episodes: int = 5000,
     num_epochs: int = 40,
     target_update_frequency: int = 5,  # More frequent target updates
-    epsilon_min: float = 0.05,  # Slightly higher minimum exploration
+    epsilon: float = .6,
+    epsilon_min: float = 0.1,  # Slightly higher minimum exploration
     batch_size: int = 128,  # Smaller batch size for more frequent updates
-    learning_rate: float = 0.0005  # Slower learning rate for more stable training
+    learning_rate: float = 0.0005,  # Slower learning rate for more stable training
+    from_pretrained: bool = False
 ) -> None:
     """Train two agents through self-play.
     
@@ -405,8 +406,11 @@ def train_agents(
         batch_size: Size of training batches
         learning_rate: Learning rate for the optimizer
     """
-    agent1 = TicTacToeAgent(1, epsilon_min=epsilon_min, learning_rate=learning_rate)
-    agent2 = TicTacToeAgent(-1, epsilon_min=epsilon_min, learning_rate=learning_rate)
+    agent1 = TicTacToeAgent(1, epsilon_min=epsilon_min, epsilon=epsilon, learning_rate=learning_rate)
+    agent2 = TicTacToeAgent(-1, epsilon_min=epsilon_min, epsilon=epsilon, learning_rate=learning_rate)
+    if from_pretrained:
+        agent1.load_model_from_file("agent1_model.pth")
+        agent2.load_model_from_file("agent2_model.pth")
     
     total_reward1 = 0
     total_reward2 = 0
@@ -528,4 +532,4 @@ def train_agents(
 
 
 if __name__ == "__main__":
-    train_agents()
+    train_agents(from_pretrained=True)
