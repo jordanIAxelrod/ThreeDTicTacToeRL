@@ -1,5 +1,5 @@
 from game import ThreeDTicTacToe
-from DQNAgent import TicTacToeAgent
+from models.DQNAgent import TicTacToeAgent
 from utils import print_board
 
 

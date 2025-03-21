@@ -6,6 +6,13 @@ class ThreeDTicTacToe:
         """Initialize a 3x3x3 tic-tac-toe board."""
         self.board = torch.zeros((3, 3, 3), dtype=torch.int8)
         self.winning_coordinates = None  # Store winning coordinates
+    
+    def clone(self) -> 'ThreeDTicTacToe':
+        """Return a deep copy of the board."""
+        new_board = ThreeDTicTacToe()
+        new_board.board = self.board.clone()
+        new_board.winning_coordinates = self.winning_coordinates
+        return new_board
 
     def move(self, player: int, position: tuple) -> bool:
         """
@@ -116,22 +123,27 @@ class ThreeDTicTacToe:
                     self.winning_coordinates = [(k, 2-k, i) for k in range(3)]
                 return int(board[i, 0, 2])
 
-        # Check 3D diagonals across layers
-        diag1 = board.diagonal(dim1=0, dim2=1).diagonal().sum()
-        diag2 = board.diagonal(dim1=0, dim2=2).diagonal().sum()
-        diag3 = board.diagonal(dim1=1, dim2=2).diagonal().sum()
-        diag4 = board.flip(2).diagonal(dim1=0, dim2=1).diagonal().sum()
-
         # Check 3D diagonals
+        # Main diagonal (0,0,0) to (2,2,2)
+        diag1 = self.board.diagonal(dim1=0, dim2=1).diagonal().sum()
         if abs(diag1) == 3:
             self.winning_coordinates = [(i, i, i) for i in range(3)]
             return int(torch.sign(diag1))
+
+        # Diagonal (0,0,2) to (2,2,0)
+        diag2 = torch.flip(self.board, [2]).diagonal(dim1=0, dim2=1).diagonal().sum()
         if abs(diag2) == 3:
             self.winning_coordinates = [(i, i, 2-i) for i in range(3)]
             return int(torch.sign(diag2))
+
+        # Diagonal (0,2,0) to (2,0,2)
+        diag3 = torch.flip(self.board, [1]).diagonal(dim1=0, dim2=2).diagonal().sum()
         if abs(diag3) == 3:
             self.winning_coordinates = [(i, 2-i, i) for i in range(3)]
             return int(torch.sign(diag3))
+
+        # Diagonal (2,0,0) to (0,2,2)
+        diag4 = torch.flip(self.board, [0]).diagonal(dim1=1, dim2=2).diagonal().sum()
         if abs(diag4) == 3:
             self.winning_coordinates = [(2-i, i, i) for i in range(3)]
             return int(torch.sign(diag4))

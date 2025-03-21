@@ -10,7 +10,30 @@
     <div class="container">
         <h1>3D Tic Tac Toe</h1>
         <div class="game-status" id="gameStatus">Click "New Game" to start!</div>
-        <button id="newGameBtn" class="button">New Game</button>
+        <div class="game-controls">
+            <button id="newGameBtn" class="button">New Game</button>
+            <div class="ai-mode-toggle">
+                <label class="switch">
+                    <input type="checkbox" id="aiVsAiToggle">
+                    <span class="slider round"></span>
+                </label>
+                <span>AI vs AI Mode</span>
+            </div>
+            <div class="ai-mode-toggle">
+                <label class="switch">
+                    <input type="checkbox" id="minimaxToggle">
+                    <span class="slider round"></span>
+                </label>
+                <span>Use Minimax</span>
+            </div>
+            <div class="ai-mode-toggle">
+                <label class="switch">
+                    <input type="checkbox" id="playerFirstToggle">
+                    <span class="slider round"></span>
+                </label>
+                <span>Player Goes First</span>
+            </div>
+        </div>
         
         <div class="game-board">
             <!-- Three layers of the 3D board -->
