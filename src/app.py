@@ -37,6 +37,7 @@ def initialize_game(ai_vs_ai=False, use_minimax=False, player_first=True):
             agent2 = TicTacToeAgent(-1 if player_first else 1, epsilon=0)
             try:
                 agent2.load_model_from_file("agent1_model.pth")
+                agent2.online_network.eval()
             except Exception as e:
                 print(e)
                 print("Warning: Could not load model file. Using untrained agent.")
@@ -206,11 +207,14 @@ def make_move():
                 bot_x, bot_y = move
             else:
                 action = agent2.select_action(game)
+                print(action)
+                print(game.get_state())
                 bot_x, bot_y = divmod(action, 3)
 
             # When player goes first, AI is O (-1), when AI goes first, it is X (1)
             bot_value = -1 if player_first else 1
             game.move(bot_value, (bot_x, bot_y))
+            print(game.get_state())
 
             status = check_game_status()
             response = {

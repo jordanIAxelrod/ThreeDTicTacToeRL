@@ -4,6 +4,8 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>3D Tic Tac Toe</title>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/three.js/r128/three.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
 </head>
 <body>
@@ -35,23 +37,10 @@
             </div>
         </div>
         
-        <div class="game-board">
-            <!-- Three layers of the 3D board -->
-            <div class="board-layer" id="layer0">
-                <h3>Top Layer</h3>
-                <div class="grid"></div>
-            </div>
-            <div class="board-layer" id="layer1">
-                <h3>Middle Layer</h3>
-                <div class="grid"></div>
-            </div>
-            <div class="board-layer" id="layer2">
-                <h3>Bottom Layer</h3>
-                <div class="grid"></div>
-            </div>
+        <div id="game-container">
+            <canvas id="game-canvas"></canvas>
         </div>
     </div>
-
     <script src="{{ url_for('static', filename='script.js') }}"></script>
 </body>
 </html> 

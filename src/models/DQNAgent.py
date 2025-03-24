@@ -123,6 +123,8 @@ class TicTacToeAgent:
         self.temperature = 3.0
         self.illegal_moves_count = 0  # Track illegal moves per episode
 
+        self.game_symmetry = [0, 0]  # the first digit is the rotation from 0 - 2, second is to flip the board 0 or 1.
+
         if model_path:
             self.online_network.load_state_dict(torch.load(model_path))
             self.epsilon = 0  # Disable exploration when playing
@@ -131,18 +133,44 @@ class TicTacToeAgent:
         """Update the target network with the online network's weights."""
         self.target_network.load_state_dict(self.online_network.state_dict())
 
-    def get_q_values(self, state: np.ndarray, legal_moves: List[int]) -> torch.Tensor:
-        """Get Q-values for legal moves.
+    def into_symmetric_space(self, state: torch.Tensor) -> torch.Tensor:
+        """Apply symmetry to the state.
         
         Args:
             state: Current game state
+            
+        Returns:
+            Symmetric game state
+        """
+
+        state = state.rot90(self.game_symmetry[0])
+        if self.game_symmetry[1]:
+            state = state.transpose(1, 0)
+        return state
+
+    def out_of_symmetric_space(self, state: torch.Tensor) -> torch.Tensor:
+        """Convert a symmetric state back to the original space.
+        
+        Args:
+            state: Symmetric game state
+            
+        """
+        if self.game_symmetry[1]:
+            state = state.transpose(1, 0)
+        state = state.rot90(-self.game_symmetry[0])
+        return state
+
+    def get_q_values(self, state: torch.Tensor, legal_moves: List[int]) -> torch.Tensor:
+        """Get Q-values for legal moves.
+        
+        Args:
+            state: Current game state tensor
             legal_moves: List of legal move indices
             
         Returns:
             Q-values for legal moves
         """
-        state_tensor = torch.tensor(state * self.number, dtype=torch.float32).flatten().unsqueeze(0)
-        q_values = self.online_network(state_tensor).squeeze()
+        q_values = self.online_network((state * self.number).float()).squeeze()
         return q_values[legal_moves]
 
     def select_action(self, game: ThreeDTicTacToe, first_move: bool = False) -> int:
@@ -155,8 +183,7 @@ class TicTacToeAgent:
             Selected action index
         """
        
-        q_values = self.online_network(torch.tensor(game.get_state() * self.number, dtype=torch.float32).flatten().unsqueeze(0).to(device)).squeeze()
-
+        q_values = self.online_network((game.get_state() * self.number).float()).squeeze()
         if random.random() < self.epsilon or first_move:
             action = self.sample_action(list(range(9)), q_values)
         else:
@@ -178,10 +205,10 @@ class TicTacToeAgent:
 
     def store_experience(
         self,
-        state: np.ndarray,
+        state: torch.Tensor,
         action: int,
         reward: float,
-        next_state: np.ndarray,
+        next_state: torch.Tensor,
         done: bool
     ) -> None:
         """Store an experience tuple in the replay memory.
@@ -211,14 +238,14 @@ class TicTacToeAgent:
             states, actions, rewards, next_states, dones = zip(*batch)
 
             # Convert to tensors
-            states = torch.tensor(np.array(states), dtype=torch.float32).view(batch_size, -1).to(device)
-            next_states = torch.tensor(np.array(next_states), dtype=torch.float32).view(batch_size, -1).to(device)
+            states = torch.stack(states).float().to(device)
+            next_states = torch.stack(next_states).float().to(device)
             actions = torch.tensor(actions, dtype=torch.int64).unsqueeze(1).to(device)
             rewards = torch.tensor(rewards, dtype=torch.float32).unsqueeze(1).to(device)
             dones = torch.tensor(dones, dtype=torch.float32).unsqueeze(1).to(device)    
 
             # Get current Q values
-            q_values = self.online_network(states * self.number).gather(1, actions)
+            q_values = self.online_network((states * self.number).float()).gather(1, actions)
 
             # Compute target Q values using Double DQN
             with torch.no_grad():
@@ -227,9 +254,9 @@ class TicTacToeAgent:
                 opponent_best_actions = self._get_opponent_actions(flipped_next_states)
                 
                 # Get true next states after opponent's move
-                true_next_states = self._simulate_opponent_move(flipped_next_states, opponent_best_actions)  # true next states from current agent perspective
+                true_next_states = self._simulate_opponent_move(flipped_next_states, opponent_best_actions, dones)  # true next states from current agent perspective
                 # Compute target Q-values
-                next_q_values = self.target_network(true_next_states * self.number).max(dim=1, keepdim=True)[0]
+                next_q_values = self.target_network((true_next_states * self.number).float()).max(dim=1, keepdim=True)[0]
                 target_q_values = rewards + (self.gamma * next_q_values * (1 - dones))
 
             # Compute loss and optimize
@@ -253,16 +280,16 @@ class TicTacToeAgent:
         """
         opponent_actions = []
         for state in states:
-            lm = [i * 3 + j for i, j in legal_moves(state.numpy().reshape(3,3,3))]
+            lm = [i * 3 + j for i, j in legal_moves(state.cpu().numpy().reshape(3,3,3))]
             if not lm:
                 opponent_actions.append(0)
             else:
-                opponent_q_values = self.get_q_values(state.numpy().reshape(3,3,3), lm)
+                opponent_q_values = self.get_q_values(state, lm)
                 best_action = lm[opponent_q_values.argmax().item()]
                 opponent_actions.append(best_action)
         return torch.tensor(opponent_actions, dtype=torch.int64).unsqueeze(1)
 
-    def _simulate_opponent_move(self, states: torch.Tensor, actions: torch.Tensor) -> torch.Tensor:
+    def _simulate_opponent_move(self, states: torch.Tensor, actions: torch.Tensor, dones: torch.Tensor) -> torch.Tensor:
         """Simulate opponent's move to get true next states.
         
         Args:
@@ -273,15 +300,21 @@ class TicTacToeAgent:
             States after opponent's moves from current agent perspective
         """
         simulated_states = states.clone()
-        for i in range(len(states)):
-            board = simulated_states[i].view(3, 3, 3)
+        for idx in range(len(states)):
+            if dones[idx].item():  # Skip if game is done
+                continue
+                
+            board = simulated_states[idx].view(3, 3, 3)
+            x, y = divmod(actions[idx].item(), 3)
             
-            x, y = divmod(actions[i].item(), 3)
-            for i in range(3):
-                if board[x, y, i] == 0: 
-                    board[x, y, i] = self.number
+            # Find first empty z position
+            for z in range(3):
+                if board[x, y, z] == 0:
+                    board[x, y, z] = self.number
                     break
-            simulated_states[i] = -board.flatten()  # Reverse the perspective
+                    
+            simulated_states[idx] = -board.flatten()  # Reverse perspective back
+            
         return simulated_states
 
     def save_model(self, filename: str) -> None:
@@ -314,14 +347,14 @@ class TicTacToeAgent:
         self.illegal_moves_count = 0
 
 
-def initialize_game() -> Tuple[ThreeDTicTacToe, np.ndarray, bool, int]:
+def initialize_game() -> Tuple[ThreeDTicTacToe, torch.Tensor, bool, int]:
     """Initialize a new game.
     
     Returns:
         Tuple containing (game instance, initial state, done flag, starting player)
     """
     game = ThreeDTicTacToe()
-    state = game.get_state().numpy()
+    state = game.get_state()
     done = False
     player = random.choice([-1, 1])
     return game, state, done, player
@@ -349,51 +382,62 @@ def get_reward(game: ThreeDTicTacToe, player: int, move: Tuple[int, int]) -> Tup
         game: Current game instance
         player: Current player number
         move: Move coordinates (x, y)
-        is_illegal: Whether the move was illegal
         
     Returns:
-        Tuple containing (reward value, done flag)
+        Tuple containing (reward value, done flag, done_next_move flag)
     """
     reward = 0
     done = False
-    can_win = player in game.check_two_in_a_row()
-    opponent_can_win = -player in game.check_two_in_a_row()
-
+    done_next_move = False
     
+    # Check opponent's winning potential before the move
+    opponent_could_win = -player in game.check_two_in_a_row()
+    
+    # Make the move and get game state
     if not game.move(player, move):
-        reward = -2.0  # Increased penalty for invalid moves
-    elif game.check_win() == player:
-        reward = 10.0  - game.board.abs().sum() / 27 * 9  # Increased reward for winning
+        reward = -5.0  # Severe penalty for invalid moves
+        return reward, done, done_next_move
+        
+    # Check if we won
+    if game.check_win() == player:
+        reward = 15.0 - game.board.abs().sum() / 27 * 9  # Higher reward for quick wins
         done = True
-    elif opponent_can_win:
-        # not blocking opponent's winning move
-        reward = -8.0 + game.board.abs().sum() / 27 * 7
-    elif can_win:
-        # Missed opportunity to win
-        reward = -5.0
-    elif game.full_board():
-        reward = 1.0
-        done = True
-    else:
-        # Strategic positioning rewards
-        if sum([player == two_in_a_row for two_in_a_row in game.check_two_in_a_row()]) > 1:
-            reward = 3.0  # Creating multiple winning opportunities
-        elif player in game.check_two_in_a_row():
-            reward = 2.0  # Creating a winning opportunity
+        return reward, done, done_next_move
+        
+    # Check if we successfully blocked opponent's winning move
+    if opponent_could_win:
+        # Check if opponent still has a winning move after our move
+        if -player in game.check_two_in_a_row():
+            reward = -12.0 + game.board.abs().sum() / 27 * 8  # Severe penalty for missing crucial blocks
+            done_next_move = True
         else:
-            reward = 0.1  # Small positive reward for valid moves to encourage exploration
+            reward = 8.0  # High reward for successful blocks
+            
+    # Check if we created a winning opportunity
+    elif player in game.check_two_in_a_row():
+        reward = 1.0  # small reward for creating winning opportunities dont want this to overpower blocking
+        
+    # Check if game ended in draw
+    elif game.full_board():
+        reward = 2.0  # Small positive reward for draws
+        done = True
+        
+    # Evaluate position quality
+    else:
+        # Small positive reward for valid moves to encourage exploration
+        reward += 0.1
 
-    return reward, done
+    return reward, done, done_next_move
 
 
 def train_agents(
-    num_episodes: int = 5000,
+    num_episodes: int = 10000,  # More episodes per epoch
     num_epochs: int = 40,
-    target_update_frequency: int = 5,  # More frequent target updates
-    epsilon: float = .6,
-    epsilon_min: float = 0.1,  # Slightly higher minimum exploration
-    batch_size: int = 128,  # Smaller batch size for more frequent updates
-    learning_rate: float = 0.0005,  # Slower learning rate for more stable training
+    target_update_frequency: int = 10,  # Less frequent target updates to allow learning to stabilize
+    epsilon: float = 0.8,  # Higher initial exploration
+    epsilon_min: float = 0.15,  # Slightly higher minimum exploration
+    batch_size: int = 256,  # Larger batch size for more stable gradients
+    learning_rate: float = 0.0003,  # Slightly lower learning rate
     from_pretrained: bool = False
 ) -> None:
     """Train two agents through self-play.
@@ -454,9 +498,9 @@ def train_agents(
                     x, y = divmod(action, 3)
                     
                     # Get reward and store experience for legal move
-                    reward, done = get_reward(game, player, (x, y))
-                    next_state = game.get_state().numpy()
-                    agent.store_experience(state, action, reward, next_state, done)
+                    reward, done, done_next_move = get_reward(game, player, (x, y))
+                    next_state = game.get_state()
+                    agent.store_experience(state, action, reward, next_state, done or done_next_move)
                     state = next_state
                     
                 if player == 1:
@@ -532,4 +576,4 @@ def train_agents(
 
 
 if __name__ == "__main__":
-    train_agents(from_pretrained=True)
+    train_agents()
