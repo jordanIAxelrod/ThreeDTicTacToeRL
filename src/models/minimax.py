@@ -53,7 +53,7 @@ class MinimaxAgent:
         if progress < 0.2:  # Early game
             return min(7, self.max_depth)
         elif progress < 0.5:  # Mid game
-            return min(7, self.max_depth)
+            return min(8, self.max_depth)
         return self.max_depth  # Late game
 
     def get_move(self, game: ThreeDTicTacToe):

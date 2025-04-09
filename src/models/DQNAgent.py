@@ -47,7 +47,7 @@ class DQN(nn.Module):
         self.fc3 = nn.Linear(256, 9)  # 9 possible moves (x, y positions)
         
         # Dropout for regularization
-        self.dropout = nn.Dropout(0.2)
+        self.dropout = nn.Dropout(0.5)
 
     def forward(self, x: torch.Tensor) -> torch.Tensor:
         """Forward pass through the network.
